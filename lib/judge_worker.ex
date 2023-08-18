@@ -1,14 +1,29 @@
 defmodule JudgeWorker do
   use GenServer
   require Logger
+  alias Amqp.Dto.SubmissionEvaluated
 
   def start_link(_) do
     GenServer.start_link(__MODULE__, :ok, name: :rabbit)
   end
 
-  def handle_info({:basic_deliver, payload, _meta}, state) do
-    Logger.info(payload)
+  def handle_info({:basic_deliver, json_payload, _meta} = event, state) do
+    Logger.debug("Received event: #{inspect(event)}")
+    {:ok, payload} = Jason.decode(json_payload, keys: :atoms)
+
+    {:ok, event_to_send} = eval_submission(payload)
+      |> Jason.encode()
+    AMQP.Basic.publish(state.channel, "evaluated-submissions-topic", "", event_to_send)
+
     {:noreply, state}
+  end
+
+  def eval_submission(%{code: _code, cases: cases, submission_id: submission_id}) do
+    # TODO - actual logic
+    results = cases
+    |> Enum.map(fn x -> "OK" end)
+
+    SubmissionEvaluated.new(submission_id, results)
   end
 
   def handle_info(msg, state) do
