@@ -17,21 +17,29 @@ defmodule JudgeWorker do
     {:noreply, state}
   end
 
+  def handle_info(msg, state) do
+    Logger.warn("Received unknown msg #{inspect(msg)}")
+    {:noreply, state}
+  end
+
   def eval_submission(%{code: code, cases: cases, submission_id: submission_id}) do
     dir = "#{System.tmp_dir!()}\\submissions\\#{submission_id}"
     File.mkdir_p!(dir)
     code_file = "#{dir}\\code.cpp"
     exe_file = "#{dir}\\code.exe"
     File.write!(code_file, code)
-    System.cmd("g++", [code_file, "-o", exe_file]) # TODO - Compilation errors
+    {_, status_code} = System.cmd("g++", [code_file, "-o", exe_file])
 
-    test_results = cases
-    |> Enum.with_index
-    |> Enum.map(fn ({test_case, id}) -> run_test(
-      exe_file,
-      test_case,
-      "#{dir}\\test-#{id}}"
-    ) end)
+    test_results = case status_code do
+      0 -> cases
+      |> Enum.with_index
+      |> Enum.map(fn ({test_case, id}) -> run_test(
+        exe_file,
+        test_case,
+        "#{dir}\\test-#{id}}"
+      ) end)
+      _ -> cases |> Enum.map(fn _ -> "CE" end)
+    end
 
     SubmissionEvaluated.new(submission_id, test_results)
   end
@@ -51,11 +59,6 @@ defmodule JudgeWorker do
     else
       "WA"
     end
-  end
-
-  def handle_info(msg, state) do
-    Logger.warn("Received unknown msg #{inspect(msg)}")
-    {:noreply, state}
   end
 
   def init(:ok) do
