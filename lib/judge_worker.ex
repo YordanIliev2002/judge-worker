@@ -22,7 +22,12 @@ defmodule JudgeWorker do
     {:noreply, state}
   end
 
-  def eval_submission(%{code: code, cases: cases, submission_id: submission_id}) do
+  def eval_submission(%{
+    code: code,
+    cases: cases,
+    submission_id: submission_id,
+    tl_millis: tl_millis
+  }) do
     dir = "#{System.tmp_dir!()}\\submissions\\#{submission_id}"
     File.mkdir_p!(dir)
     code_file = "#{dir}\\code.cpp"
@@ -36,7 +41,8 @@ defmodule JudgeWorker do
       |> Enum.map(fn ({test_case, id}) -> run_test(
         exe_file,
         test_case,
-        "#{dir}\\test-#{id}}"
+        "#{dir}\\test-#{id}}",
+        tl_millis
       ) end)
       _ -> cases |> Enum.map(fn _ -> "CE" end)
     end
@@ -47,17 +53,29 @@ defmodule JudgeWorker do
   defp run_test(
     exe_file,
     test_case,
-    input_file
+    input_file,
+    tl_millis
   ) do
     File.write!(input_file, test_case.input)
-    # TODO - TL
-    res = :os.cmd(:"type #{input_file} | #{exe_file}") |> List.to_string()
-    actual = String.replace(res, ~r/(\r|\n)/, "")
-    expected = String.replace(test_case.output, ~r/(\r|\n)/, "")
-    if actual == expected do
-      "OK"
-    else
-      "WA"
+    task = Task.async(fn ->
+      :os.cmd(:"type #{input_file} | #{exe_file}") |> List.to_string()
+    end)
+    res = try do
+      {:ok, Task.await(task, tl_millis)}
+    catch
+      :exit, _ -> {:err, "TL"}
+    end
+
+    case res do
+      {:err, reason} -> reason
+      {:ok, actual_output} ->
+        actual = String.replace(actual_output, ~r/(\r|\n)/, "")
+        expected = String.replace(test_case.output, ~r/(\r|\n)/, "")
+        if actual == expected do
+          "OK"
+        else
+          "WA"
+        end
     end
   end
 
